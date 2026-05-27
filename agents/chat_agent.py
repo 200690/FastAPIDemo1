@@ -15,19 +15,20 @@ from typing_extensions import Annotated
 load_dotenv()
 
 # 状态,BaseModel数据验证模型，TypedDict类型提示字典
-class PydanticState(BaseModel):
+class PydanticState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     user_input: str
     agent_response: str
     tool_output: str
-    mood: str = "happy"
+    tool_call: str
+    mood: str
 
-    @field_validator("mood")
-    @classmethod
-    def validate_mood(cls, value):
-        if value not in ["happy", "sad"]:
-            raise ValueError("情绪状态异常")
-        return value
+    # @field_validator("mood")
+    # @classmethod
+    # def validate_mood(cls, value):
+    #     if value not in ["happy", "sad"]:
+    #         raise ValueError("情绪状态异常")
+    #     return value
 
 # 私有状态
 class ToolState(TypedDict):
@@ -57,9 +58,9 @@ def chat_model(state):
         raise Exception("模型初始化失败")
     trimmed_messages = trim_messages(
         message_history,
-        max_token = 1000,
+        max_tokens = 1000,
         strategy = "last",
-        token_counter = ChatOpenAI(model="deepseek-v4-flash", temperature=0),
+        token_counter=len,
         allow_partial = False
     )
     llm_response = model.invoke(trimmed_messages)
@@ -67,7 +68,8 @@ def chat_model(state):
 
 # 判断条件边
 def should_turn(state) -> Literal["chat_model", "END"]:
-    if state["tool_call"]:
+    last_message = state["messages"][-1]
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "chat_model"
     return END
 
@@ -77,6 +79,7 @@ def filter_message(state):
     message_remove = []
     for message in message_history:
         if message.content == "你好" or message.content == "hello":
+            print(f"删除{message.content}")
             message_remove.append(RemoveMessage(id = message.id))
     return {"messages": message_remove}
 
@@ -90,14 +93,17 @@ def tool_node(state: ToolState) -> PydanticState:
 workflow = StateGraph(PydanticState)
 
 workflow.add_node(chat_model)
-workflow.add_node(should_turn)
-workflow.add_node(tool_nodes)
+# workflow.add_node(tool_nodes)
 workflow.add_node(filter_message)
 
-workflow.add_conditional_edges("chat_model", should_turn)
 workflow.add_edge(START, "filter_message")
 workflow.add_edge("filter_message", "chat_model")
-
+workflow.add_conditional_edges("chat_model", should_turn,
+                               {
+                                   "chat_model": "chat_model",  # 返回 "chat_model" 时去的节点
+                                   END: END  # 返回 "END" 时结束
+                               }
+                               )
 
 
 app = workflow.compile()
