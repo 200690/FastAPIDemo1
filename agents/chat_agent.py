@@ -2,6 +2,7 @@ import random
 from typing import TypedDict, Literal
 
 from langchain_core.messages import BaseMessage, trim_messages, RemoveMessage
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import RetryPolicy, Command
 from pydantic import BaseModel,field_validator
 
@@ -76,7 +77,8 @@ def chat_model(state):
 def should_turn(state) -> Literal["chat_model", "END"]:
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "chat_model"
+        print(f"调用工具节点")
+        return END
     return END
 
 # 删除问候
@@ -117,7 +119,7 @@ workflow.add_node(filter_message)
 
 workflow.add_edge(START, "filter_message")
 workflow.add_edge("filter_message", "command_node")
-workflow.add_edge("command_node", "chat_model")
+# workflow.add_edge("command_node", "chat_model")
 workflow.add_conditional_edges("chat_model", should_turn,
                                {
                                    "chat_model": "chat_model",  # 返回 "chat_model" 时去的节点
@@ -126,4 +128,4 @@ workflow.add_conditional_edges("chat_model", should_turn,
                                )
 
 
-app = workflow.compile()
+app = workflow.compile(checkpointer = MemorySaver())
