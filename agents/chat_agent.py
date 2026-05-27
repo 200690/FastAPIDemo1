@@ -1,7 +1,8 @@
+import random
 from typing import TypedDict, Literal
 
 from langchain_core.messages import BaseMessage, trim_messages, RemoveMessage
-from langgraph.types import RetryPolicy
+from langgraph.types import RetryPolicy, Command
 from pydantic import BaseModel,field_validator
 
 from langchain_core.tools import tool
@@ -54,6 +55,11 @@ tool_nodes = ToolNode(tools)
 def chat_model(state):
     model = ChatOpenAI(model="deepseek-v4-flash", temperature=0).bind_tools(tools)
     message_history = state["messages"]
+    # 测试调用失败
+    # random_number = random.randint(0, 100)
+    # if random_number < 90:
+    #     print("调用失败，请重试")
+    #     raise Exception("<UNK>")
     if not model:
         raise Exception("模型初始化失败")
     trimmed_messages = trim_messages(
@@ -83,17 +89,22 @@ def filter_message(state):
             message_remove.append(RemoveMessage(id = message.id))
     return {"messages": message_remove}
 
-# 工具解析节点（待）
-def tool_node(state: ToolState) -> PydanticState:
-    if state:
-        return {"tool_call": '工具节点调用成功'}
-    else:
-        raise Exception("state为空")
+
+# Command 测试
+def command_node(state: PydanticState):  # 建议用 PydanticState，别用 ToolState
+    print("进入command")
+    if state.get("agent_response", "") == "":
+        return Command(
+            update={"user_input": "输出请求处理\n"},
+            goto="chat_model"
+        )
+
 
 workflow = StateGraph(PydanticState)
 
 workflow.add_node(chat_model,
                   retry=RetryPolicy(
+                      retry_on=Exception,  # 所有错误重试
                       max_attempts=5,  # 最大重试5次
                       initial_interval=0.5,  # 初始重试间隔0.5秒
                       backoff_factor=2.0,  # 退避因子2.0 (指数退避)
@@ -101,11 +112,12 @@ workflow.add_node(chat_model,
                       jitter=True  # 添加随机抖动
                   )
                   )
-# workflow.add_node(tool_nodes)
+workflow.add_node(command_node)
 workflow.add_node(filter_message)
 
 workflow.add_edge(START, "filter_message")
-workflow.add_edge("filter_message", "chat_model")
+workflow.add_edge("filter_message", "command_node")
+workflow.add_edge("command_node", "chat_model")
 workflow.add_conditional_edges("chat_model", should_turn,
                                {
                                    "chat_model": "chat_model",  # 返回 "chat_model" 时去的节点
