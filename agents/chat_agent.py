@@ -92,7 +92,15 @@ def tool_node(state: ToolState) -> PydanticState:
 
 workflow = StateGraph(PydanticState)
 
-workflow.add_node(chat_model)
+workflow.add_node(chat_model,
+                  retry=RetryPolicy(
+                      max_attempts=5,  # 最大重试5次
+                      initial_interval=0.5,  # 初始重试间隔0.5秒
+                      backoff_factor=2.0,  # 退避因子2.0 (指数退避)
+                      max_interval=8.0,  # 最大重试间隔8秒
+                      jitter=True  # 添加随机抖动
+                  )
+                  )
 # workflow.add_node(tool_nodes)
 workflow.add_node(filter_message)
 
